@@ -22,7 +22,7 @@ ADC10, TimerA interrupt LPM wakeup, TimerA PWM like output, button use, integer 
 are used and demonstrated.
 
 Features:
- 
+
 	. 8 bit integer FFT
 	. 32 samples at 250Hz separation
 	. shows 16 amplitudes of 250Hz, 500Hz, 750Hz,....... 5.75Khz, 6.75Khz, 7.75Khz non-linear
@@ -68,10 +68,10 @@ Features:
                    +--------------------------+
 
   (A) to P1.4 EduBoost Mic jumper middle pin
-  (B) to Condenser Mic, EduBoost Mic Jumper top pin 
+  (B) to Condenser Mic, EduBoost Mic Jumper top pin
   (C) to Potentiometer, EduBooster Potentiometer Jumper top pin
   (*) connect Gnd + Vcc to Launchpad
- 
+
 
  Chris Chung June 2013
  . init release
@@ -87,46 +87,112 @@ Features:
 #include <msp430.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <math.h>
 
-#define EBLCD_CLK	BIT5	// P1
-#define EBLCD_DATA	BIT7	// P1
-#define EBLCD_RS	BIT3	// P2
+#define OP_NOOP 0x00
+#define OP_DECODEMODE 0x09
+#define OP_INTENSITY 0x0A
+#define OP_SCANLIMIT 0x0B
+#define OP_SHUTDOWN 0x0C
+#define OP_DISPLAYTEST 0x0F
 
-//______________________________________________________________________
-void eblcd_write(uint8_t d, uint8_t cmd) {
-	if (cmd) P2OUT &= ~EBLCD_RS;
-	else P2OUT |= EBLCD_RS;
+#define LED_CS		BIT5	//2.5 is CS
+#define LED_DATA	BIT7	//1.7 is SPI MOSI
+#define LED_CLK		BIT5	//1.5 is SPI clock
 
-	cmd = 8;
-	while (cmd--) {
-		if (d&0x80) P1OUT |= EBLCD_DATA;
-		else P1OUT &= ~EBLCD_DATA;
-		d <<= 1;
-		P1OUT &= ~EBLCD_CLK;
-		P1OUT |= EBLCD_CLK;
-		P1OUT &= ~EBLCD_CLK;
-	}//while
+typedef union
+{
+	unsigned long longn;
+	unsigned int ints[2];
+	unsigned char chars[4];
+} longbytes;
+
+union {
+	unsigned char bytes[8*4];
+	longbytes lbytes[8];
+	unsigned long ulongs[8];
+} dbuff;
+
+void SPI_Init(void) //SPI initialization
+{
+	P1SEL |= LED_DATA + LED_CLK;			//spi init
+	P1SEL2 |= LED_DATA + LED_CLK;			//spi init
+
+	UCB0CTL1 = UCSWRST;
+	UCB0CTL0 |= UCMSB + UCMST + UCSYNC + UCCKPH;	// 3-pin, 8-bit SPI master
+	UCB0CTL1 |= UCSSEL_2;				// SMCLK
+	UCB0BR0 = 0;					// spi speed is smclk/1 - 1MHz
+	UCB0BR1 = 0;					//
+	UCB0CTL1 &= ~UCSWRST;				// **Initialize USCI state machine**
+
+	P2DIR |= LED_CS;				//cs is output
+	P2SEL &= ~LED_CS;				//cs is not module
+	P2SEL2 &= ~LED_CS;				//cs is not module
+}
+
+unsigned char spibuff[8];
+
+void SPI_Write(unsigned char* array)
+{
+	P2OUT &= ~LED_CS;
 	__delay_cycles(50);
+	unsigned int h = 8;
+	while(h) {
+		UCB0TXBUF = *array;
+		while (UCB0STAT & UCBUSY);
+		++array; --h;
+	}
+	P2OUT |= LED_CS;
 }
 
-//______________________________________________________________________
-void eblcd_setcg(uint8_t which, uint8_t *dp) {
-	uint8_t i;
-	which <<= 3;
-	which |= 0x40;
-	for (i=0; i<8; i++) {
-		eblcd_write(which+i, 1);
-		eblcd_write(*dp++, 0);
-	}//for
+void Init_MAX7219(void)
+{
+	unsigned char config_reg[5] = { OP_DECODEMODE, OP_INTENSITY, OP_SCANLIMIT, OP_SHUTDOWN, OP_DISPLAYTEST };
+	unsigned char config_val[5] = {          0x00,         0x00,         0x07,        0x01,           0x00 };
+
+	unsigned int g,h;
+
+	for(h = 0; h < sizeof(config_reg); ++h) {
+		for(g = 0; g < 4; ++g) {
+			spibuff[ (g << 1)     ] = config_reg[h];
+			spibuff[ (g << 1) + 1 ] = config_val[h];
+		}
+		SPI_Write(spibuff);
+	};
 }
 
-//______________________________________________________________________
-const char hex_map[] = "0123456789abcdef";
-void eblcd_hex(uint8_t d) {
-	eblcd_write(hex_map[d>>4], 0);
-	eblcd_write(hex_map[d&0x0f], 0);
+void update_display()
+{
+	unsigned char i;
+	for(i = 0; i < 8; ++i) {
+		spibuff[0] = i+1;
+		spibuff[1] = dbuff.lbytes[i].chars[0];
+		spibuff[2] = i+1;
+		spibuff[3] = dbuff.lbytes[i].chars[1];
+		spibuff[4] = i+1;
+		spibuff[5] = dbuff.lbytes[i].chars[2];
+		spibuff[6] = i+1;
+		spibuff[7] = dbuff.lbytes[i].chars[3];
+
+		SPI_Write(spibuff);
+	}
 }
 
+uint16_t int_sqrt32(uint32_t x)
+{
+	uint16_t res=0;
+	uint16_t add= 0x8000;
+	int i;
+	for(i=0;i<16;i++) {
+		uint16_t temp=res | add;
+		uint32_t g2=temp*temp;
+		if (x>=g2) {
+			res=temp;
+		}
+		add>>=1;
+	}
+	return res;
+}
 
 //______________________________________________________________________
 volatile uint16_t play_at = 0;
@@ -134,7 +200,8 @@ volatile uint8_t ticks=0;
 
 int16_t fix_fft(int8_t fr[], int8_t fi[], int16_t m, int16_t inverse);
 //______________________________________________________________________
-void main(void) {
+int main(void) {
+
 	WDTCTL = WDTPW + WDTHOLD;		// Stop WDT
 	BCSCTL1 = CALBC1_16MHZ;			// 16MHz clock
 	DCOCTL = CALDCO_16MHZ;
@@ -143,14 +210,17 @@ void main(void) {
 	P1DIR = P2DIR = 0;
 	P1OUT = P2OUT = 0;
 
-	//______________ lcd port use
-	P1DIR |= BIT0|EBLCD_CLK|EBLCD_DATA;
-	P2DIR |= EBLCD_RS;
+	//______________ led port use
+	SPI_Init();
+
+	__delay_cycles(100000);
+	Init_MAX7219();
+	__delay_cycles(1000);
 
 	//______________ adc setting, use via microphone jumper on educational boost
 	ADC10CTL0 = SREF_1 + ADC10SHT_2 + REFON + ADC10ON + ADC10IE;
-	ADC10CTL1 = INCH_4;                       // input A4
-	ADC10AE0 |= BIT4;                         // P1.4 ADC microphone
+	ADC10CTL1 = INCH_4;		       // input A4
+	ADC10AE0 |= BIT4;			 // P1.4 ADC microphone
 
 	uint8_t gen_tone=0;						// default, not tone generation
 
@@ -166,53 +236,18 @@ void main(void) {
 	P2DIR |= BIT6;
 	_BIS_SR(GIE); 						// now
 
-	const uint8_t lcd_init[] = { 0x30, 0x30, 0x39, 0x14, 0x56, 0x6d, 0x70, 0x0c, 0x06, 0x01, 0x00, };
-	const char hello0[] = "     MSP430     ";
-	const char hello1[] = "  POWER PLAYERS ";
-
-    eblcd_write(0x30, 1);
-	__delay_cycles(500000);
-
-	const uint8_t *cmd_ptr = lcd_init;
-	while (*cmd_ptr) eblcd_write(*cmd_ptr++, 1);		// lcd init sequence
-	__delay_cycles(50000);
-
-	const uint8_t cgfonts[8][8] = {		// vertical bar fonts for graphing
-		{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, },
-		{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0x1f, },
-		{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0x1f, 0x1f, },
-		{ 0x00, 0x00, 0x00, 0x00, 0x1f, 0x1f, 0x1f, 0x1f, },
-		{ 0x00, 0x00, 0x00, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, },
-		{ 0x00, 0x00, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, },
-		{ 0x00, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, },
-		{ 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, 0x1f, },
-	};
-
-	uint8_t i=0;
-	eblcd_write(0x38, 1);
-	for (i=0;i<8;i++) eblcd_setcg(i, (uint8_t*) cgfonts[i]);	// load bar fonts
-	eblcd_write(0x39, 1);
-    eblcd_write(0x02, 1);
-    eblcd_write(0x80, 1);
-
-	cmd_ptr = (uint8_t*) hello0;
-	while (*cmd_ptr) eblcd_write(*cmd_ptr++, 0);		// hello display
-	eblcd_write(0x80|0x40, 1);
-	cmd_ptr = (uint8_t*) hello1;
-	while (*cmd_ptr) eblcd_write(*cmd_ptr++, 0);
-
-	__delay_cycles(5000000);
+	uint8_t i=0,j=0;
 
 #define log2FFT   5
 #define FFT_SIZE  (1<<log2FFT)
-#define Nx        (2 * FFT_SIZE)
+#define Nx	(2 * FFT_SIZE)
 #define log2N     (log2FFT + 1)
 #define BAND_FREQ_KHZ	8
 
 
 	const  uint8_t pick[16] = { 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 23, 27, 31, };
 	int8_t data[Nx], im[Nx];
-	uint8_t plot[Nx/2] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, };
+	uint8_t plot[Nx/2]; // = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, };
 	uint8_t cnt=0, freq=0;
 	while (1) {
 		if (gen_tone) {
@@ -234,7 +269,7 @@ void main(void) {
 
 			// time delay between adc samples
 			// this will become the band frequency after time - frequency conversion
-			
+
 			TA0CCR0 += (16000/(BAND_FREQ_KHZ*2))-1;	// begin counting for next period
 			ADC10CTL0 |= ENC + ADC10SC;			// sampling and conversion start
 			while (ADC10CTL1 & ADC10BUSY);		// stay and wait for it
@@ -275,32 +310,28 @@ void main(void) {
 				plot[i] = data[i];
 			}//if
 			else {
-				if (plot[i]) plot[i]--;
+				if (plot[i])
+					plot[i]--;
 			}//else
 			// debug use
 			//eblcd_hex(data[i]>>8);
 			//eblcd_hex(data[i]&0xff);
 		}//for
-		eblcd_write(0x02, 1);
-
 
 		for (i=0;i<16;i++) {
 			uint8_t idx = pick[i];
 			if (gen_tone) idx = i;
-			eblcd_write(0x80+i, 1);
-			eblcd_write(plot[idx]>=8 ? plot[idx]-8 : ' ', 0);
-			eblcd_write((0x80|0x40)+i, 1);
-			eblcd_write(plot[idx]>7 ? 7 : plot[idx], 0);
+			for(j=0;j<8;++j) {
+				if(j<plot[idx]) {
+					dbuff.ulongs[j] |= 1UL << i;
+				} else {
+					dbuff.ulongs[j] &= ~(1UL << i);
+				}
+			}
 		}//for
 
 		if (gen_tone) {
-			eblcd_write(0x02, 1);
-			if (freq > 7)
-				eblcd_write(0x80, 1);
-			else
-				eblcd_write(0x80|0x0e, 1);
-			eblcd_write((freq/10)+'0', 0);
-			eblcd_write((freq%10)+'0', 0);
+			dbuff.lbytes[0].chars[3] = freq;
 		}//if
 		if (!(P1IN&BIT3)) {
 			while (!(P1IN&BIT3)) asm("nop");
@@ -320,11 +351,13 @@ void main(void) {
 					break;
 			}//switch
 		}//while
+
+		update_display();
 		//__delay_cycles(100000);		// personal taste
 	}//while
 
-} 
- 
+}
+
 // ADC10 interrupt service routine
 #pragma vector=ADC10_VECTOR
 __interrupt void ADC10_ISR (void) {
@@ -332,23 +365,21 @@ __interrupt void ADC10_ISR (void) {
 }
 
 // Timer A0 interrupt service routine
-//
 #pragma vector=TIMER0_A0_VECTOR
 __interrupt void Timer0_A0 (void) {
 	//P1OUT ^= BIT0;
 	__bic_SR_register_on_exit(CPUOFF);
 }
-//
-//
+
 //________________________________________________________________________________
 //interrupt(TIMERA1_VECTOR) Timer_A1(void) {
 #pragma vector=TIMER0_A1_VECTOR
 __interrupt void Timer0_A1 (void) {
 	switch(TAIV) {
-		case  2: 
+		case  2:
 			CCR1 += play_at;
 			break;
-		case 10: 
+		case 10:
 			if (ticks) ticks--;
 			break;
 	}//switch
