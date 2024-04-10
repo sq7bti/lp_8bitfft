@@ -85,7 +85,7 @@ const int8_t Sinewave[N_WAVE-N_WAVE/4] = {
 
 
 
-
+#define fixed int8_t
 
 /*
   FIX_MPY() - fixed-point16_t multiplication & scaling.
@@ -95,23 +95,12 @@ const int8_t Sinewave[N_WAVE-N_WAVE/4] = {
 */
 inline int8_t FIX_MPY(int8_t a, int8_t b)
 {
-  
-  //Serial.print16_tln(a);
- //Serial.print16_tln(b);
-  
-  
     /* shift right one less bit (i.e. 15-1) */
     int16_t c = ((int16_t)a * (int16_t)b) >> 6;
     /* last bit shifted out = rounding-bit */
     b = c & 0x01;
     /* last shift + rounding bit */
     a = (c >> 1) + b;
-
-        /*
-        Serial.print16_tln(Sinewave[3]);
-        Serial.print16_tln(c);
-        Serial.print16_tln(a);
-        while(1);*/
 
     return a;
 }
@@ -195,14 +184,6 @@ int16_t fix_fft(int8_t fr[], int8_t fi[], int16_t m, int16_t inverse)
             /* 0 <= j < N_WAVE/2 */
             //wr =  pgm_read_word_near(Sinewave + j+N_WAVE/4);
             wr =  Sinewave[j+N_WAVE/4];
-
-/*Serial.print16_tln("asdfasdf");
-Serial.print16_tln(wr);
-Serial.print16_tln(j+N_WAVE/4);
-Serial.print16_tln(Sinewave[256]);
-
-Serial.print16_tln("");*/
-
 
             //wi = -pgm_read_word_near(Sinewave + j);
             wi = -Sinewave[j];

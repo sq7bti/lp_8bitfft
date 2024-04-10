@@ -23,7 +23,7 @@ OUTDIR = build
 CFLAGS = -Os -Wall -ffunction-sections -fdata-sections -fno-inline-small-functions -mmcu=$(MCU) $(INCLUDES)
 ASFLAGS = -mmcu=$(MCU) -x assembler-with-cpp -Wa,-gstabs
 LDFLAGS = -mmcu=$(MCU) -Wl,-Map=$(OUTDIR)/$(TARGET).map -Wl,--relax -Wl,--gc-sections
-LIBS=-lm
+#LIBS=-lm
 #######################################
 # end of user configuration
 #######################################
