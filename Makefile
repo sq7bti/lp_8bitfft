@@ -1,29 +1,22 @@
 # MSP430 Makefile
-# #####################################
-#
-# Part of the uCtools project
-# uctools.github.com
-#
-#######################################
 # user configuration:
 #######################################
 # TARGET: name of the output file
-TARGET = led_fft
+TARGET = main
 # MCU: part number to build for
 MCU = msp430g2553
 # SOURCES: list of input source sources
-SOURCES = led_fft.c fix_fft.c
+SOURCES = fix_fft.c led_fft.c
 # INCLUDES: list of includes, by default, use Includes directory
-#INCLUDES = -IInclude
-INCLUDES =
+INCLUDES = -IInclude -I/opt/ti/msp430-gcc/include
 # OUTDIR: directory to use for output
 OUTDIR = build
 # define flags
-#CFLAGS = -mmcu=$(MCU) -g -Os -Wall -Wunused -ffunction-sections -fdata-sections -fno-inline-small-functions $(INCLUDES)
-CFLAGS = -Os -Wall -ffunction-sections -fdata-sections -fno-inline-small-functions -mmcu=$(MCU) $(INCLUDES)
+CFLAGS = -mmcu=$(MCU) -g -Os -Wall -Wunused $(INCLUDES)
+# CFLAGS += -mtiny-printf
 ASFLAGS = -mmcu=$(MCU) -x assembler-with-cpp -Wa,-gstabs
-LDFLAGS = -mmcu=$(MCU) -Wl,-Map=$(OUTDIR)/$(TARGET).map -Wl,--relax -Wl,--gc-sections
-#LIBS=-lm
+#LDFLAGS = -mmcu=$(MCU) -Wl,-Map=$(OUTDIR)/$(TARGET).map -lm
+LDFLAGS = -mmcu=$(MCU) -Wl,-Map=$(OUTDIR)/$(TARGET).map
 #######################################
 # end of user configuration
 #######################################
@@ -31,15 +24,16 @@ LDFLAGS = -mmcu=$(MCU) -Wl,-Map=$(OUTDIR)/$(TARGET).map -Wl,--relax -Wl,--gc-sec
 #######################################
 # binaries
 #######################################
-CC      	= msp430-gcc
-LD      	= msp430-ld
-AR      	= msp430-ar
-AS      	= msp430-gcc
-GASP    	= msp430-gasp
-NM      	= msp430-nm
-OBJCOPY 	= msp430-objcopy
-STRIP		= msp430-strip
-SIZE		= msp430-size
+CC_PREFIX       = msp430-elf
+CC      	= ${CC_PREFIX}-gcc
+LD      	= ${CC_PREFIX}-ld
+AR      	= ${CC_PREFIX}-ar
+AS      	= ${CC_PREFIX}-as
+GASP    	= ${CC_PREFIX}-gasp
+NM      	= ${CC_PREFIX}-nm
+OBJCOPY 	= ${CC_PREFIX}-objcopy
+STRIP		= ${CC_PREFIX}-strip
+SIZE		= ${CC_PREFIX}-size
 MAKETXT 	= srec_cat
 UNIX2DOS	= unix2dos
 RM      	= rm -f
@@ -68,10 +62,10 @@ $(OUTDIR)/%.hex: $(OUTDIR)/%.elf
 $(OUTDIR)/$(TARGET).elf: $(OBJECTS)
 	$(CC) $(OBJECTS) $(LDFLAGS) $(LIBS) -o $@
 	$(STRIP) $@
-	$(SIZE) --format=sysv $@
+	$(SIZE) $@
 
 $(OUTDIR)/%.o: src/%.c | $(OUTDIR)
-	$(CC) $(CFLAGS) -o $@ -c $<
+	$(CC) -c $(CFLAGS) -o $@ $<
 
 # assembly listing
 %.lst: %.c

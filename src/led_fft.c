@@ -44,9 +44,18 @@ Features:
       --|RST        XOUT|-
         |               |
         |           P1.4|<-- ADC4
-        |               |
+				|               |
         |           P1.6|--> TA0.1
+				|               |
+				|           P1.5|--> SPI CLK
+				|           P1.7|--> SPI MOSI
+				|           P2.5|--> SPI /CS
 
+				#define LED_CS		BIT5					//2.5 is CS
+				#define LED_DATA	BIT7					//1.7 is SPI MOSI
+				#define LED_CLK		BIT5					//1.5 is SPI clock
+
+				#define BUSY_PIN	BIT0					// P1.0 BUSY_PIN output
 
 
    LM358 Dual Op-Amp, GBW @0.7Mhz, each stage @x100 gain, bandwidth is 7Khz
@@ -107,6 +116,7 @@ Features:
 #define GREEN_LED	BIT6
 
 #define SATURATION 16
+#define DOTS 1
 
 typedef union
 {
@@ -173,10 +183,10 @@ void update_display() {
 	unsigned char i;
 	for(i = 0; i < 8; ++i) {
 		spibuff[0] = spibuff[2] = spibuff[4] = spibuff[6] = i+1;
-		spibuff[1] = dbuff.lbytes[i].chars[3];
-		spibuff[3] = dbuff.lbytes[i].chars[2];
-		spibuff[5] = dbuff.lbytes[i].chars[1];
-		spibuff[7] = dbuff.lbytes[i].chars[0];
+		spibuff[1] = dbuff.lbytes[i].chars[0];
+		spibuff[3] = dbuff.lbytes[i].chars[1];
+		spibuff[5] = dbuff.lbytes[i].chars[2];
+		spibuff[7] = dbuff.lbytes[i].chars[3];
 		SPI_Write(spibuff);
 	}
 }
@@ -223,7 +233,8 @@ unsigned char sqrt16(unsigned short a) {
 
 //______________________________________________________________________
 volatile uint16_t play_at = 0;
-volatile uint8_t ticks=0;
+volatile uint16_t ticks=0;
+uint16_t droop = 0;
 
 // scilab 255 * window('kr',64,6)
 //const unsigned short hamming[32] = { 4, 6, 9, 13, 17, 23, 29, 35, 43, 51, 60, 70, 80, 91, 102, 114, 126, 138, 151, 163, 175, 187, 198, 208, 218, 227, 234, 241, 247, 251, 253, 255 };
@@ -263,7 +274,7 @@ int main(void) {
 	ADC10CTL1 = INCH_4;					// input A4
 	ADC10AE0 |= BIT4;					// P1.4 ADC microphone
 
-	uint8_t gen_tone=0;					// default, not tone generation
+	uint8_t gen_tone = 0;					// default, not tone generation
 
 	P1OUT |= BIT3;						// tactile button pull-up
 	P1REN |= BIT3;
@@ -296,7 +307,7 @@ int main(void) {
 	uint8_t cnt=0, freq=0;
 	while (1) {
 		if (gen_tone) {
-			if (!(++cnt&0x3f)) {
+			if (!(++cnt&0x7f)) {
 				cnt = 0;
 				freq++;
 				if (freq > 31)
@@ -353,102 +364,96 @@ int main(void) {
 		// pseudo oscilloscope
 		if (1) {
 
-		offset >>= (log2FFT+1);
-		// signal leveling
-		for (i=0;i<Nx;i++)
-//			data[i] -= offset >> (log2FFT+1);
-			data[i] = (sample[i] - offset) >> 2;
-//			switch(gen_tone) {
-//				case 0:
-//					data[i] -= offset >> (log2FFT+1);
-//				break;
-//				default:
-//					data[i] -= 128;
-//				break;
-//			}
+			offset >>= (log2FFT+1);
+			// signal leveling
+			for (i=0;i<Nx;i++)
+	//			data[i] -= offset >> (log2FFT+1);
+				data[i] = (sample[i] - offset) >> 2;
+	//			switch(gen_tone) {
+	//				case 0:
+	//					data[i] -= offset >> (log2FFT+1);
+	//				break;
+	//				default:
+	//					data[i] -= 128;
+	//				break;
+	//			}
 
-//		if(gen_tone==0) {
-			// windowing
-			for (i=0;i<Nx;i++) {
-				hamm = hamming[i<(FFT_SIZE-1)?i:(Nx-1)-i] * data[i];
-//				data[i] = (offset >> (log2FFT+1)) + (hamm >> 8);
-				data[i] = (hamm >> 8);
+	//		if(gen_tone==0) {
+				// windowing
+				for (i=0;i<Nx;i++) {
+					hamm = hamming[i<(FFT_SIZE-1)?i:(Nx-1)-i] * data[i];
+	//				data[i] = (offset >> (log2FFT+1)) + (hamm >> 8);
+					data[i] = (hamm >> 8);
+				}
+	//		}
+
+			P1OUT |= BUSY_PIN;
+			fix_fft(data, im, log2N, 0);	// thank you, Tom Roberts(89),Malcolm Slaney(94),...
+			P1OUT &= ~BUSY_PIN;
+
+			for (i=0;i<FFT_SIZE;i++) {
+				//P1OUT |= BUSY_PIN;
+				data[i] = sqrt16(data[i]*data[i] + im[i]*im[i]);
+				//P1OUT &= ~BUSY_PIN;
+				//
+				if (gen_tone) {
+					data[i] >>= 3;
+				} else {
+					//_______ logarithm scale mapping
+	//				const uint16_t lvls[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 16, 22, 32, 45, 63, 89 };
+	//				const uint16_t lvls[] = { 1, 2, 3, 4, 5, 12, 34, 94 };
+	//                                                        0  1  2  3  4   5   6   7
+					const uint16_t lvls[] = { 1, 2, 2, 3, 4, 5, 6, 7, 8 };
+	//				const uint16_t lvls[] = { 1, 2, 3, 4, 5,  6, 12, 24 };
+					uint8_t c = 8; //sizeof(lvls)/sizeof(uint16_t);
+					while((data[i] < lvls[c]) && (--c));
+					data[i] = c;
+				}
+
+				if (data[i] > 16)
+					data[i] = 15;
+				if (data[i] < 0)
+					data[i] = 0;
+				if (data[i] > plot[i])
+				{
+					plot[i] = data[i];
+				} else {
+					if(!droop)
+					{
+						droop = 8;
+						if (plot[i])
+							plot[i]--;
+					} else {
+						--droop;
+					}
+				}//else
+
+			}//for
+
+			unsigned long mask = 1UL, rmask = 1UL << 31;;
+			for (i=0; i<FFT_SIZE; ++i, mask <<= 1, rmask >>= 1) {
+	#ifdef DOTS
+				dbuff.ulongs[plot[i]] |= rmask;
+	#else
+				for(j=0;j<8;++j)
+				{
+					if(j<plot[i])
+						dbuff.ulongs[j] |= rmask;
+					else
+						dbuff.ulongs[j] &= ~(rmask);
+				}
+	#endif
+			}//for
+
+			if (gen_tone)
+				dbuff.lbytes[7].chars[freq>15?0:3] = freq;
+			else {
+	//			dbuff.lbytes[7].chars[0] = plot[0];
+				if(offset<0)
+					offset = -offset;
+				dbuff.lbytes[7].ints[1] = offset; // >> (log2FFT+1));
+	//			dbuff.lbytes[7].longs = 1UL << (offset >> 5); // >> (log2FFT+1));
 			}
-//		}
-
-		P1OUT |= BUSY_PIN;
-		fix_fft(data, im, log2N, 0);	// thank you, Tom Roberts(89),Malcolm Slaney(94),...
-		P1OUT &= ~BUSY_PIN;
-
-		for (i=0;i<FFT_SIZE;i++) {
-			//P1OUT |= BUSY_PIN;
-			data[i] = sqrt16(data[i]*data[i] + im[i]*im[i]);
-			//P1OUT &= ~BUSY_PIN;
-			//
-			if (gen_tone) {
-				data[i] >>= 3;
-			} else {
-				//_______ logarithm scale mapping
-//				const uint16_t lvls[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 16, 22, 32, 45, 63, 89 };
-//				const uint16_t lvls[] = { 1, 2, 3, 4, 5, 12, 34, 94 };
-//                                                        0  1  2  3  4   5   6   7
-				const uint16_t lvls[] = { 1, 2, 2, 3, 4, 5, 6, 7, 8 };
-//				const uint16_t lvls[] = { 1, 2, 3, 4, 5,  6, 12, 24 };
-				uint8_t c = 8; //sizeof(lvls)/sizeof(uint16_t);
-				while((data[i] < lvls[c]) && (--c));
-				data[i] = c;
-			}
-
-			if (data[i] > 16)
-				data[i] = 15;
-			if (data[i] < 0)
-				data[i] = 0;
-			if (data[i] > plot[i]) {
-				plot[i] = data[i];
-			} else {
-				if (plot[i])
-					plot[i]--;
-			}//else
-		}//for
-
-		unsigned long mask = 1UL;
-		for (i=0; i<32; ++i, mask <<= 1) {
-			for(j=0;j<8;++j) {
-				if(j<plot[i])
-					dbuff.ulongs[j] |= mask;
-				else
-					dbuff.ulongs[j] &= ~(mask);
-			}
-		}//for
-
-		if (gen_tone)
-			dbuff.lbytes[7].chars[freq>15?0:3] = freq;
-		else {
-//			dbuff.lbytes[7].chars[0] = plot[0];
-			if(offset<0)
-				offset = -offset;
-			dbuff.lbytes[7].ints[1] = offset; // >> (log2FFT+1));
-//			dbuff.lbytes[7].longs = 1UL << (offset >> 5); // >> (log2FFT+1));
-		}
-
-		if (!(P1IN&BIT3)) {
-			while (!(P1IN&BIT3)) asm("nop");
-			play_at = 0;
-			P1SEL &= ~BIT6;
-			P2SEL &= ~BIT6;
-			gen_tone++;
-			switch (gen_tone) {
-				case 1:
-					P1SEL |= BIT6;		// pin toggle on
-					break;
-				case 2:
-					P2SEL |= BIT6;		// buzzer on
-					break;
-				default:
-					gen_tone = 0;
-					break;
-			}//switch
-		}//if
 
 		// pseudo-scilloscope
 		} else {
@@ -492,25 +497,31 @@ int main(void) {
 						dbuff.ulongs[j] &= ~(1UL << (i/2));
 				}//for
 			}//for
-
-			if (!(P1IN&BIT3)) {
-				while (!(P1IN&BIT3)) asm("nop");
-				gen_tone++;
-				switch (gen_tone) {
-					case 1:
-					case 2:
-					break;
-					default:
-						gen_tone = 0;
-					break;
-				}//switch
-			}//if
-
 		}
+
+		if (!(P1IN&BIT3)) {
+			while (!(P1IN&BIT3)) asm("nop");
+			play_at = 0;
+			P1SEL &= ~BIT6;
+			P2SEL &= ~BIT6;
+			gen_tone++;
+			switch (gen_tone) {
+				case 1:
+					P1SEL |= BIT6;		// pin toggle on
+					break;
+				case 2:
+					P2SEL |= BIT6;		// buzzer on
+					break;
+				default:
+					gen_tone = 0;
+					break;
+			}//switch
+		}//if
 
 		//P1OUT |= BUSY_PIN;
 		update_display();
 		//P1OUT &= ~BUSY_PIN;
+		bzero(dbuff.ulongs, 8*4);
 
 //		__delay_cycles(100000);			// personal taste
 		if (!gen_tone) {
@@ -523,27 +534,47 @@ int main(void) {
 }
 
 // ADC10 interrupt service routine
+#if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
 #pragma vector=ADC10_VECTOR
-__interrupt void ADC10_ISR (void) {
+__interrupt void ADC10_ISR(void)
+#elif defined(__GNUC__)
+void __attribute__ ((interrupt(ADC10_VECTOR))) ADC10_ISR (void)
+#else
+#error Compiler not supported!
+#endif
+{
 	__bic_SR_register_on_exit(CPUOFF);
 }
 
-// Timer A0 interrupt service routine
+#if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
 #pragma vector=TIMER0_A0_VECTOR
-__interrupt void Timer0_A0 (void) {
+__interrupt void Timer0_A0_iSR(void)
+#elif defined(__GNUC__)
+void __attribute__ ((interrupt(TIMER0_A0_VECTOR))) Timer0_A0_iSR (void)
+#else
+#error Compiler not supported!
+#endif
+{
 	//P1OUT ^= BIT0;
 	__bic_SR_register_on_exit(CPUOFF);
 }
 
 //________________________________________________________________________________
 //interrupt(TIMERA1_VECTOR) Timer_A1(void) {
+#if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
 #pragma vector=TIMER0_A1_VECTOR
-__interrupt void Timer0_A1 (void) {
+__interrupt void Timer0_A1_iSR(void)
+#elif defined(__GNUC__)
+void __attribute__ ((interrupt(TIMER0_A1_VECTOR))) Timer0_A1_iSR (void)
+#else
+#error Compiler not supported!
+#endif
+{
 	switch(TAIV) {
-		case  2:
+		case TA0IV_TACCR1:
 			CCR1 += play_at;
 			break;
-		case 10:
+		case TA0IV_TAIFG:
 			if (ticks)
 				ticks--;
 			break;
