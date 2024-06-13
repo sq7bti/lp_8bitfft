@@ -147,7 +147,7 @@ const int16_t Sinewave[N_WAVE-N_WAVE/4] = {
   optimization suited to a particluar DSP processor.
   Scaling ensures that result remains 16-bit.
 */
-inline int16_t FIX_MPY(int16_t a, int16_t b)
+int16_t FIX_MPY(int16_t a, int16_t b)
 {
 	/* shift right one less bit (i.e. 15-1) */
 	int c = ((int)a * (int)b) >> 14;

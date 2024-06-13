@@ -14,9 +14,7 @@ footprints;
 Description:
 
 This audio spectrum analyzer is a project for the TI Launchpad (Value Line) w/
-CircuitCo's Educational BoosterPack. It is microphone based and require minimal
-external components. Efforts were made to maximize the use of device / features from
-the Educational BoosterPack.
+audio input at ADC10 port 4.
 
 ADC10, TimerA interrupt LPM wakeup, TimerA PWM like output, button use, integer arithmatic
 are used and demonstrated.
@@ -25,16 +23,15 @@ Features:
 
 	. 8 bit integer FFT
 	. 32 samples at 250Hz separation
-	. shows 16 amplitudes of 250Hz, 500Hz, 750Hz,....... 5.75Khz, 6.75Khz, 7.75Khz non-linear
+	. shows 16 amplitudes of 250Hz, 500Hz, 750Hz,....... 5.75kHz, 6.75kHz, 7.75kHz non-linear
 	. partial logarithm map to show amplitudes, limited as resolution has been reduced for 8 bit FFT
 	. LM358 two stage mic pre-amp at 100x 100x gain (can be improve vastly w/ better op-amps)
-	. utilize Educational BoosterPack; mic for input, potentiometer for pre-amp biasing
 	. draws power from launchpad
 	. square signal generator from TA0.1 toggling, good for initial testing
-	. TA0.1 ouput to P1.6 (io) or P2.6 (buzzer)
-	. P1.3 button used to cycle thru 1. no ouput, 2. P1.6 signal, 3. P2.6 buzzer
-	* in mode 2 and 3, both band and amplitude scales are linear
-	* in mode 3, signals are distorted after passing buzzer and condensor mic, especially in low frequency
+	. TA0.1 ouput to P1.6 (io)
+	. P1.3 button used to cycle thru 1. no ouput, 2. P1.6 signal
+	. P2.3 button used to toggle LSB/_USB display mode: for LSB audio spectrum is reversed to mimic spectrum reversal in LSB RF modulation
+
 
 
           TI LaunchPad + Educational BoosterPack
@@ -50,6 +47,8 @@ Features:
 				|           P1.5|--> SPI CLK
 				|           P1.7|--> SPI MOSI
 				|           P2.5|--> SPI /CS
+				|               |
+				|           P2.3|--> LSB/_USB switch
 
 				#define LED_CS		BIT5					//2.5 is CS
 				#define LED_DATA	BIT7					//1.7 is SPI MOSI
@@ -116,7 +115,7 @@ Features:
 #define GREEN_LED	BIT6
 
 #define SATURATION 16
-#define DOTS 1
+//#define DOTS 1
 
 typedef union
 {
@@ -237,9 +236,9 @@ volatile uint16_t ticks=0;
 uint16_t droop = 0;
 
 // scilab 255 * window('kr',64,6)
-//const unsigned short hamming[32] = { 4, 6, 9, 13, 17, 23, 29, 35, 43, 51, 60, 70, 80, 91, 102, 114, 126, 138, 151, 163, 175, 187, 198, 208, 218, 227, 234, 241, 247, 251, 253, 255 };
+const unsigned short hamming[32] = { 4, 6, 9, 13, 17, 23, 29, 35, 43, 51, 60, 70, 80, 91, 102, 114, 126, 138, 151, 163, 175, 187, 198, 208, 218, 227, 234, 241, 247, 251, 253, 255 };
 // scilab 255 * window('kr',64,4)
-const unsigned short hamming[32] = { 23, 29, 35, 42, 50, 58, 66, 75, 84, 94, 104, 113, 124, 134, 144, 154, 164, 174, 183, 192, 201, 210, 217, 224, 231, 237, 242, 246, 250, 252, 254, 255 };
+//const unsigned short hamming[32] = { 23, 29, 35, 42, 50, 58, 66, 75, 84, 94, 104, 113, 124, 134, 144, 154, 164, 174, 183, 192, 201, 210, 217, 224, 231, 237, 242, 246, 250, 252, 254, 255 };
 // scilab 255 * window('kr',64,2)
 //const unsigned short hamming[32] = { 112, 119, 126, 133, 140, 147, 154, 161, 167, 174, 180, 186, 192, 198, 204, 209, 214, 219, 224, 228, 232, 236, 239, 242, 245, 247, 250, 251, 253, 254, 255, 255 };
 
@@ -278,6 +277,10 @@ int main(void) {
 
 	P1OUT |= BIT3;						// tactile button pull-up
 	P1REN |= BIT3;
+
+	P2OUT |= BIT3 | BIT4;
+	P2REN |= BIT3 | BIT4;
+
 	//______________ setup test tone signal via TA0.1
 	TA0CCR0 = TA0CCR1 = 0;
 
@@ -285,7 +288,6 @@ int main(void) {
 	TA0CCTL1 = OUTMOD_4 + CCIE;				// we want pin-toggle, 2 times slower
 	TA0CCR1 = play_at;
 	P1DIR |= BIT6;						// prepare both T0.1
-	P2DIR |= BIT6;
 	_BIS_SR(GIE); 						// now
 
 	uint8_t i=0,j=0;
@@ -294,7 +296,8 @@ int main(void) {
 #define FFT_SIZE  (1<<log2FFT)
 #define Nx	(2 * FFT_SIZE)
 #define log2N     (log2FFT + 1)
-#define BAND_FREQ_KHZ	8
+//#define BAND_FREQ_KHZ	8
+#define BAND_FREQ_KHZ	4
 
 	for (i=0;i<8;i++)
 		dbuff.ulongs[i] = i; //0UL;
@@ -307,16 +310,17 @@ int main(void) {
 	uint8_t cnt=0, freq=0;
 	while (1) {
 		if (gen_tone) {
-			if (!(++cnt&0x7f)) {
+			if (!(++cnt&0x3f)) {
 				cnt = 0;
 				freq++;
 				if (freq > 31)
 					freq = 1;
 				//____________ now play at 250Hz increments
-				play_at = (16000/freq*2)-1;
-//				P1OUT ^= BIT0;
+				//play_at = (16000/freq*2)-1;
+				//____________ now play at 125Hz increments
+				//play_at = (16000/freq*4)-1;
+				play_at = (16000/freq*(16/BAND_FREQ_KHZ))-1;
 				__delay_cycles(100000);
-//				P1OUT ^= BIT0;
 			}//if
 		}//if
 
@@ -361,23 +365,26 @@ int main(void) {
 		}//for
 		TA0CCTL0 &= ~CCIE;
 
+		offset >>= (log2FFT+1);
+		// signal leveling
+		for (i=0;i<Nx;i++)
+//			data[i] -= offset >> (log2FFT+1);
+			data[i] = (sample[i] - offset) >> 2;
+
 		// pseudo oscilloscope
-		if (1) {
+		if (P2IN&BIT4) {
 
-			offset >>= (log2FFT+1);
-			// signal leveling
-			for (i=0;i<Nx;i++)
-	//			data[i] -= offset >> (log2FFT+1);
-				data[i] = (sample[i] - offset) >> 2;
-	//			switch(gen_tone) {
-	//				case 0:
-	//					data[i] -= offset >> (log2FFT+1);
-	//				break;
-	//				default:
-	//					data[i] -= 128;
-	//				break;
-	//			}
+//			switch(gen_tone) {
+//				case 0:
+//					data[i] -= offset >> (log2FFT+1);
+//				break;
+//				default:
+//					data[i] -= 128;
+//				break;
+//			}
 
+//#define WINDOWING
+#ifdef WINDOWING
 	//		if(gen_tone==0) {
 				// windowing
 				for (i=0;i<Nx;i++) {
@@ -386,6 +393,7 @@ int main(void) {
 					data[i] = (hamm >> 8);
 				}
 	//		}
+#endif // WINDOWING
 
 			P1OUT |= BUSY_PIN;
 			fix_fft(data, im, log2N, 0);	// thank you, Tom Roberts(89),Malcolm Slaney(94),...
@@ -398,15 +406,19 @@ int main(void) {
 				//
 				if (gen_tone) {
 					data[i] >>= 3;
+					data[i] -= data[i] >> 2;
 				} else {
 					//_______ logarithm scale mapping
 	//				const uint16_t lvls[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 16, 22, 32, 45, 63, 89 };
 	//				const uint16_t lvls[] = { 1, 2, 3, 4, 5, 12, 34, 94 };
 	//                                                        0  1  2  3  4   5   6   7
-					const uint16_t lvls[] = { 1, 2, 2, 3, 4, 5, 6, 7, 8 };
+						//const uint16_t lvls[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 65535 };
+						//const uint16_t lvls[] = { 0, 1, 2, 4, 8, 16, 32, 64, 65535 };
+						const uint16_t lvls[] = { 1, 3, 6, 10, 20, 48, 84, 65535 };
 	//				const uint16_t lvls[] = { 1, 2, 3, 4, 5,  6, 12, 24 };
-					uint8_t c = 8; //sizeof(lvls)/sizeof(uint16_t);
-					while((data[i] < lvls[c]) && (--c));
+					uint8_t c = 0; //sizeof(lvls)/sizeof(uint16_t);
+					while(lvls[c] < data[i])
+				 		(++c);
 					data[i] = c;
 				}
 
@@ -431,36 +443,37 @@ int main(void) {
 			}//for
 
 			unsigned long mask = 1UL, rmask = 1UL << 31;;
-			for (i=0; i<FFT_SIZE; ++i, mask <<= 1, rmask >>= 1) {
-	#ifdef DOTS
-				dbuff.ulongs[plot[i]] |= rmask;
-	#else
-				for(j=0;j<8;++j)
+			for( i=0; i<FFT_SIZE; ++i, mask <<= 1, rmask >>= 1) {
+#ifdef DOTS
+				dbuff.ulongs[plot[i]] |= (P2IN&BIT3)?rmask:mask;
+#else
+				for(j = 0; j<8; ++j)
 				{
 					if(j<plot[i])
-						dbuff.ulongs[j] |= rmask;
+						dbuff.ulongs[j] |= (P2IN&BIT3)?rmask:mask;
 					else
-						dbuff.ulongs[j] &= ~(rmask);
+						dbuff.ulongs[j] &= ~((P2IN&BIT3)?rmask:mask);
 				}
-	#endif
+#endif
 			}//for
 
-			if (gen_tone)
-				dbuff.lbytes[7].chars[freq>15?0:3] = freq;
-			else {
-	//			dbuff.lbytes[7].chars[0] = plot[0];
-				if(offset<0)
-					offset = -offset;
-				dbuff.lbytes[7].ints[1] = offset; // >> (log2FFT+1));
-	//			dbuff.lbytes[7].longs = 1UL << (offset >> 5); // >> (log2FFT+1));
-			}
+			if(offset < 0)
+				offset = -offset;
+
+			dbuff.lbytes[7].chars[1] = freq;
+			dbuff.lbytes[7].ints[1] = offset; // >> (log2FFT+1));
+
+//			if (gen_tone)
+//				dbuff.lbytes[7].chars[freq>15?0:3] = freq;
+//			else
+//				dbuff.lbytes[7].ints[1] = offset; // >> (log2FFT+1));
+
+		//dbuff.lbytes[7].ints[0] = offset; // >> (log2FFT+1));
 
 		// pseudo-scilloscope
 		} else {
 
-#define WINDOWING
 #define LEVELING
-
 #ifdef LEVELING
 			// signal leveling
 			switch (gen_tone) {
@@ -474,15 +487,6 @@ int main(void) {
 				break;
 			}//switch
 #endif //def LEVELING
-
-#ifdef WINDOWING
-			// windowing
-			for (i=0;i<Nx;i++) {
-				hamm = hamming[i<32?i:63-i] * data[i];
-//				data[i] = (offset >> (log2FFT+1)) + (hamm >> 8);
-				data[i] = (hamm >> 8);
-			}
-#endif // WINDOWING
 
 			// 0..63
 			for (i=0;i<Nx;i++) {
@@ -503,14 +507,10 @@ int main(void) {
 			while (!(P1IN&BIT3)) asm("nop");
 			play_at = 0;
 			P1SEL &= ~BIT6;
-			P2SEL &= ~BIT6;
 			gen_tone++;
 			switch (gen_tone) {
 				case 1:
 					P1SEL |= BIT6;		// pin toggle on
-					break;
-				case 2:
-					P2SEL |= BIT6;		// buzzer on
 					break;
 				default:
 					gen_tone = 0;
