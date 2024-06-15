@@ -236,14 +236,14 @@ volatile uint16_t ticks=0;
 uint16_t droop = 0;
 
 // scilab 255 * window('kr',64,6)
-const unsigned short hamming[32] = { 4, 6, 9, 13, 17, 23, 29, 35, 43, 51, 60, 70, 80, 91, 102, 114, 126, 138, 151, 163, 175, 187, 198, 208, 218, 227, 234, 241, 247, 251, 253, 255 };
+//const unsigned short hamming[32] = { 4, 6, 9, 13, 17, 23, 29, 35, 43, 51, 60, 70, 80, 91, 102, 114, 126, 138, 151, 163, 175, 187, 198, 208, 218, 227, 234, 241, 247, 251, 253, 255 };
+const unsigned short hamming[64] = { 4, 6, 9, 13, 17, 23, 29, 35, 43, 51, 60, 70, 80, 91, 102, 114, 126, 138, 151, 163, 175, 187, 198, 208, 218, 227, 234, 241, 247, 251, 253, 255, 255, 253, 251, 247, 241, 234, 227, 218, 208, 198, 187, 175, 163, 151, 138, 126, 114, 102, 91, 80, 70, 60, 51, 43, 35, 29, 23, 17, 13, 9, 6, 4 };
 // scilab 255 * window('kr',64,4)
 //const unsigned short hamming[32] = { 23, 29, 35, 42, 50, 58, 66, 75, 84, 94, 104, 113, 124, 134, 144, 154, 164, 174, 183, 192, 201, 210, 217, 224, 231, 237, 242, 246, 250, 252, 254, 255 };
+//const unsigned short hamming[64] = { 23, 29, 35, 42, 50, 58, 66, 75, 84, 94, 104, 113, 124, 134, 144, 154, 164, 174, 183, 192, 201, 210, 217, 224, 231, 237, 242, 246, 250, 252, 254, 255, 255, 254, 252, 250, 246, 242, 237, 231, 224, 217, 210, 201, 192, 183, 174, 164, 154, 144, 134, 124, 113, 104, 94, 84, 75, 66, 58, 50, 42, 35, 29,23 };
 // scilab 255 * window('kr',64,2)
 //const unsigned short hamming[32] = { 112, 119, 126, 133, 140, 147, 154, 161, 167, 174, 180, 186, 192, 198, 204, 209, 214, 219, 224, 228, 232, 236, 239, 242, 245, 247, 250, 251, 253, 254, 255, 255 };
-
-int hamm;
-unsigned int offset;
+//const unsigned short hamming[64] = { 112, 119, 126, 133, 140, 147, 154, 161, 167, 174, 180, 186, 192, 198, 204, 209, 214, 219, 224, 228, 232, 236, 239, 242, 245, 247, 250, 251, 253, 254, 255, 255, 255, 255, 254, 253, 251, 250, 247, 245, 242, 239, 236, 232, 228, 224, 219, 214, 209, 204, 198, 192, 186, 180, 174, 167, 161, 154, 147, 140, 133, 126, 119, 112 };
 
 int16_t fix_fft(int8_t fr[], int8_t fi[], int16_t m, int16_t inverse);
 //int16_t fix_fft(int16_t fr[], int16_t fi[], int16_t m, short inverse);
@@ -268,7 +268,7 @@ int main(void) {
 	__delay_cycles(1000);
 
 	//______________ adc setting, use via microphone jumper on educational boost
-	ADC10CTL0 = SREF_1 + ADC10SHT_2 + REFON + ADC10ON + ADC10IE;
+	ADC10CTL0 = SREF_0 + ADC10SHT_2 + REFON + ADC10ON + ADC10IE;
 //	ADC10CTL0 = SREF_0 + ADC10SHT_2 + ADC10ON + ADC10IE;
 	ADC10CTL1 = INCH_4;					// input A4
 	ADC10AE0 |= BIT4;					// P1.4 ADC microphone
@@ -303,13 +303,14 @@ int main(void) {
 		dbuff.ulongs[i] = i; //0UL;
 	update_display();
 
+	long offset;
 	int8_t data[Nx], im[Nx];
 	int16_t sample[Nx];
 	uint8_t plot[Nx/2];
 	bzero(plot, Nx/2);
 	uint8_t cnt=0, freq=0;
 	while (1) {
-		if (gen_tone) {
+		if (1) {//gen_tone) {
 			if (!(++cnt&0x3f)) {
 				cnt = 0;
 				freq++;
@@ -325,7 +326,6 @@ int main(void) {
 		}//if
 
 		bzero(im, Nx);
-		hamm = 0;
 		offset = 0;
 
 #ifdef SATURATION
@@ -343,7 +343,7 @@ int main(void) {
 			ADC10CTL0 |= ENC + ADC10SC;		// sampling and conversion start
 			while (ADC10CTL1 & ADC10BUSY);		// stay and wait for it
 
-			sample[i] = ADC10MEM; //>>2) - 128;		// signal leveling?
+			sample[i] = ADC10MEM - 512 + 8; //>>2) - 128;		// signal leveling?
 //			offset += data[i];
 			offset += sample[i];
 //			data[i] = (ADC10MEM>>2) - 128;		// signal leveling?
@@ -365,11 +365,19 @@ int main(void) {
 		}//for
 		TA0CCTL0 &= ~CCIE;
 
-		offset >>= (log2FFT+1);
+		//offset >>= (log2FFT+1);
+		offset /= Nx;
+		//offset /= 16;
+		//offset /= 4;
 		// signal leveling
 		for (i=0;i<Nx;i++)
-//			data[i] -= offset >> (log2FFT+1);
-			data[i] = (sample[i] - offset) >> 2;
+		{
+			//data[i] -= offset >> (log2FFT+1);
+			sample[i] -= offset;
+			sample[i] >>= 2;
+			//data[i] = (sample[i] - offset) >> 2;
+			data[i] = (uint8_t)sample[i];
+		}
 
 		// pseudo oscilloscope
 		if (P2IN&BIT4) {
@@ -385,10 +393,13 @@ int main(void) {
 
 //#define WINDOWING
 #ifdef WINDOWING
+				int hamm;
+				hamm = 0;
 	//		if(gen_tone==0) {
 				// windowing
 				for (i=0;i<Nx;i++) {
-					hamm = hamming[i<(FFT_SIZE-1)?i:(Nx-1)-i] * data[i];
+					hamm = hamming[i] * data[i];
+					//hamm = hamming[i<(FFT_SIZE-1)?i:(Nx-1)-i] * data[i];
 	//				data[i] = (offset >> (log2FFT+1)) + (hamm >> 8);
 					data[i] = (hamm >> 8);
 				}
@@ -406,16 +417,18 @@ int main(void) {
 				//
 				if (gen_tone) {
 					data[i] >>= 3;
-					data[i] -= data[i] >> 2;
+					//data[i] -= data[i] >> 2;
 				} else {
 					//_______ logarithm scale mapping
-	//				const uint16_t lvls[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 16, 22, 32, 45, 63, 89 };
-	//				const uint16_t lvls[] = { 1, 2, 3, 4, 5, 12, 34, 94 };
-	//                                                        0  1  2  3  4   5   6   7
-						//const uint16_t lvls[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 65535 };
-						//const uint16_t lvls[] = { 0, 1, 2, 4, 8, 16, 32, 64, 65535 };
-						const uint16_t lvls[] = { 1, 3, 6, 10, 20, 48, 84, 65535 };
-	//				const uint16_t lvls[] = { 1, 2, 3, 4, 5,  6, 12, 24 };
+					//const uint16_t lvls[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 16, 22, 32, 45, 63, 89, 65535 };
+					//const uint16_t lvls[] = { 1, 2, 3, 4, 5, 12, 34, 94, 65535 };
+	//                                  0  1  2  3  4   5   6   7
+					//const uint16_t lvls[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 65535 };
+					//const uint16_t lvls[] = { 0, 2, 6, 8, 10, 65535 };
+					//const uint16_t lvls[] = { 0, 1, 2, 4, 8, 16, 32, 64, 65535 };
+					//const uint16_t lvls[] = { 0, 2, 6, 12, 30, 80, 128, 65535 };
+					const uint16_t lvls[] = { 0, 1, 3, 6, 10, 20, 48, 84, 65535 };
+					//const uint16_t lvls[] = { 1, 2, 3, 4, 5, 6, 12, 24, 65535 };
 					uint8_t c = 0; //sizeof(lvls)/sizeof(uint16_t);
 					while(lvls[c] < data[i])
 				 		(++c);
@@ -432,7 +445,7 @@ int main(void) {
 				} else {
 					if(!droop)
 					{
-						droop = 8;
+						droop = 6;
 						if (plot[i])
 							plot[i]--;
 					} else {
@@ -457,12 +470,16 @@ int main(void) {
 #endif
 			}//for
 
-			if(offset < 0)
-				offset = -offset;
+			//if(offset < 0)
+			//	offset = -offset;
 
-			dbuff.lbytes[7].chars[1] = freq;
-			dbuff.lbytes[7].ints[1] = offset; // >> (log2FFT+1));
-
+			//dbuff.lbytes[7].chars[0] = freq;
+			//dbuff.lbytes[7].chars[freq>15?0:3] = freq;
+			//dbuff.lbytes[7].ints[1] = offset; // >> (log2FFT+1));
+			if(abs(offset) < 15)
+				dbuff.ulongs[7] |= 1UL << (offset + 16);
+			else
+				dbuff.lbytes[7].ints[1] |= offset;
 //			if (gen_tone)
 //				dbuff.lbytes[7].chars[freq>15?0:3] = freq;
 //			else
@@ -511,9 +528,15 @@ int main(void) {
 			switch (gen_tone) {
 				case 1:
 					P1SEL |= BIT6;		// pin toggle on
+					ADC10CTL0 &= ~ENC;
+					ADC10CTL0 &= ~(SREF0 | SREF1 | SREF2);
+					ADC10CTL0 |= SREF_1 | ENC;
 					break;
 				default:
 					gen_tone = 0;
+					ADC10CTL0 &= ~ENC;
+					ADC10CTL0 &= ~(SREF0 | SREF1 | SREF2);
+					ADC10CTL0 |= SREF_0 | ENC;
 					break;
 			}//switch
 		}//if
@@ -523,9 +546,9 @@ int main(void) {
 		//P1OUT &= ~BUSY_PIN;
 		bzero(dbuff.ulongs, 8*4);
 
-//		__delay_cycles(100000);			// personal taste
+		//__delay_cycles(100000);			// personal taste
 		if (!gen_tone) {
-			i=7; //25;
+			i=1; //7; //25;
 			while(--i)
 				__delay_cycles(65535);			// personal taste
 		}
