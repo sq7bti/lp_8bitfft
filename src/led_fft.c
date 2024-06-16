@@ -115,7 +115,9 @@ Features:
 #define GREEN_LED	BIT6
 
 #define SATURATION 16
-//#define DOTS 1
+#define DOTS 5
+#define FILL 1
+//#define DEBUG 1
 
 typedef union
 {
@@ -303,15 +305,15 @@ int main(void) {
 		dbuff.ulongs[i] = i; //0UL;
 	update_display();
 
-	long offset;
+	int16_t offset;
 	int8_t data[Nx], im[Nx];
 	int16_t sample[Nx];
 	uint8_t plot[Nx/2];
 	bzero(plot, Nx/2);
 	uint8_t cnt=0, freq=0;
 	while (1) {
-		if (1) {//gen_tone) {
-			if (!(++cnt&0x3f)) {
+		if (gen_tone) {
+			if (!(++cnt&0x7f)) {
 				cnt = 0;
 				freq++;
 				if (freq > 31)
@@ -416,18 +418,18 @@ int main(void) {
 				//P1OUT &= ~BUSY_PIN;
 				//
 				if (gen_tone) {
-					data[i] >>= 3;
-					//data[i] -= data[i] >> 2;
+					data[i] >>= 2;
+					data[i] -= data[i] >> 1;
 				} else {
 					//_______ logarithm scale mapping
 					//const uint16_t lvls[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 16, 22, 32, 45, 63, 89, 65535 };
 					//const uint16_t lvls[] = { 1, 2, 3, 4, 5, 12, 34, 94, 65535 };
 	//                                  0  1  2  3  4   5   6   7
-					//const uint16_t lvls[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 65535 };
+					const uint16_t lvls[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 65535 };
 					//const uint16_t lvls[] = { 0, 2, 6, 8, 10, 65535 };
 					//const uint16_t lvls[] = { 0, 1, 2, 4, 8, 16, 32, 64, 65535 };
 					//const uint16_t lvls[] = { 0, 2, 6, 12, 30, 80, 128, 65535 };
-					const uint16_t lvls[] = { 0, 1, 3, 6, 10, 20, 48, 84, 65535 };
+					//const uint16_t lvls[] = { 0, 1, 3, 6, 10, 20, 48, 84, 65535 };
 					//const uint16_t lvls[] = { 1, 2, 3, 4, 5, 6, 12, 24, 65535 };
 					uint8_t c = 0; //sizeof(lvls)/sizeof(uint16_t);
 					while(lvls[c] < data[i])
@@ -435,44 +437,48 @@ int main(void) {
 					data[i] = c;
 				}
 
-				if (data[i] > 16)
-					data[i] = 15;
+				if (data[i] > 9)
+					data[i] = 8;
 				if (data[i] < 0)
 					data[i] = 0;
 				if (data[i] > plot[i])
 				{
 					plot[i] = data[i];
 				} else {
-					if(!droop)
-					{
-						droop = 6;
-						if (plot[i])
-							plot[i]--;
-					} else {
-						--droop;
-					}
+#ifdef DOTS
+					if(!droop && plot[i])
+						plot[i]--;
+#endif // DOTS
 				}//else
 
 			}//for
 
-			unsigned long mask = 1UL, rmask = 1UL << 31;;
-			for( i=0; i<FFT_SIZE; ++i, mask <<= 1, rmask >>= 1) {
 #ifdef DOTS
-				dbuff.ulongs[plot[i]] |= (P2IN&BIT3)?rmask:mask;
-#else
+			if(droop)
+				--droop;
+			else
+				droop = DOTS;
+#endif // DOTS
+
+			unsigned long mask = 1UL, rmask = 1UL << 31;;
+			for(i = 0; i < FFT_SIZE; ++i, mask <<= 1, rmask >>= 1) {
+#ifdef FILL
 				for(j = 0; j<8; ++j)
 				{
-					if(j<plot[i])
+					//if(j<plot[i])
+					if(j<data[i])
 						dbuff.ulongs[j] |= (P2IN&BIT3)?rmask:mask;
 					else
 						dbuff.ulongs[j] &= ~((P2IN&BIT3)?rmask:mask);
 				}
 #endif
+#ifdef DOTS
+				dbuff.ulongs[plot[i]] |= (P2IN&BIT3)?rmask:mask;
+				//dbuff.ulongs[plot[i]] |= mask;
+#endif
 			}//for
 
-			//if(offset < 0)
-			//	offset = -offset;
-
+#ifdef DEBUG
 			//dbuff.lbytes[7].chars[0] = freq;
 			//dbuff.lbytes[7].chars[freq>15?0:3] = freq;
 			//dbuff.lbytes[7].ints[1] = offset; // >> (log2FFT+1));
@@ -486,6 +492,7 @@ int main(void) {
 //				dbuff.lbytes[7].ints[1] = offset; // >> (log2FFT+1));
 
 		//dbuff.lbytes[7].ints[0] = offset; // >> (log2FFT+1));
+#endif
 
 		// pseudo-scilloscope
 		} else {
@@ -548,7 +555,7 @@ int main(void) {
 
 		//__delay_cycles(100000);			// personal taste
 		if (!gen_tone) {
-			i=1; //7; //25;
+			i=7; //25;
 			while(--i)
 				__delay_cycles(65535);			// personal taste
 		}
